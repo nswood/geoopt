@@ -1,12 +1,14 @@
-from ..manifolds import Euclidean
+from ..manifolds import Euclidean,PoincareBall,PoincareBallExact
 import torch
 
 
 class OptimMixin(object):
     _default_manifold = Euclidean()
+#     _default_manifold = PoincareBall()
 
-    def __init__(self, *args, stabilize=None, **kwargs):
+    def __init__(self, *args, stabilize=None,c = 1, **kwargs):
         self._stabilize = stabilize
+        self.c =torch.tensor(c)
         super().__init__(*args, **kwargs)
 
     def add_param_group(self, param_group: dict):

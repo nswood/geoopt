@@ -49,6 +49,7 @@ class RiemannianAdam(OptimMixin, torch.optim.Adam):
             loss = closure()
         with torch.no_grad():
             for group in self.param_groups:
+                
                 betas = group["betas"]
                 weight_decay = group["weight_decay"]
                 eps = group["eps"]
@@ -56,14 +57,19 @@ class RiemannianAdam(OptimMixin, torch.optim.Adam):
                 amsgrad = group["amsgrad"]
                 stablilize = False
                 for point in group["params"]:
+                    
+                    #Something wrong with grad here,
                     grad = point.grad
                     if grad is None:
                         continue
+#                         print('continue')
                     if isinstance(point, (ManifoldParameter, ManifoldTensor)):
+#                         print('point is already ManifoldTensor')
                         manifold = point.manifold
                     else:
+#                         print('setting up default manifold')
                         manifold = self._default_manifold
-
+#                     print(manifold)
                     if grad.is_sparse:
                         raise RuntimeError(
                             "RiemannianAdam does not support sparse gradients, use SparseRiemannianAdam instead"
@@ -88,6 +94,8 @@ class RiemannianAdam(OptimMixin, torch.optim.Adam):
                     # actual step
                     grad.add_(point, alpha=weight_decay)
                     grad = manifold.egrad2rgrad(point, grad)
+#                     print('grad')
+#                     print(grad)
                     exp_avg.mul_(betas[0]).add_(grad, alpha=1 - betas[0])
                     exp_avg_sq.mul_(betas[1]).add_(
                         manifold.component_inner(point, grad), alpha=1 - betas[1]
@@ -105,6 +113,8 @@ class RiemannianAdam(OptimMixin, torch.optim.Adam):
                     # copy the state, we need it for retraction
                     # get the direction for ascend
                     direction = exp_avg.div(bias_correction1) / denom.add_(eps)
+#                     print('direction')
+#                     print(direction)
                     # transport the exponential averaging to the new point
                     new_point, exp_avg_new = manifold.retr_transp(
                         point, -learning_rate * direction, exp_avg
@@ -120,6 +130,7 @@ class RiemannianAdam(OptimMixin, torch.optim.Adam):
                         stablilize = True
                 if stablilize:
                     self.stabilize_group(group)
+
         return loss
 
     @torch.no_grad()

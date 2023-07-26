@@ -353,6 +353,9 @@ def lambda_x(x: torch.Tensor, *, k: torch.Tensor, keepdim=False, dim=-1):
 
 @torch.jit.script
 def _lambda_x(x: torch.Tensor, k: torch.Tensor, keepdim: bool = False, dim: int = -1):
+#     if torch.isnan(x.pow(2).sum(dim=dim, keepdim=keepdim)).any():
+#         print('x')
+#         print(x[-4])
     return 2 / (1 + k * x.pow(2).sum(dim=dim, keepdim=keepdim)).clamp_min(1e-15)
 
 
@@ -1051,7 +1054,6 @@ def expmap0(u: torch.Tensor, *, k: torch.Tensor, dim=-1):
     """
     return _expmap0(u, k, dim=dim)
 
-
 @torch.jit.script
 def _expmap0(u: torch.Tensor, k: torch.Tensor, dim: int = -1):
     u_norm = u.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
@@ -1221,7 +1223,7 @@ def mobius_matvec(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
 
     Returns
     -------
-    tensor
+    a
         Möbius matvec result
     """
     return _mobius_matvec(m, x, k, dim=dim)
@@ -1245,6 +1247,48 @@ def _mobius_matvec(m: torch.Tensor, x: torch.Tensor, k: torch.Tensor, dim: int =
     res = torch.where(cond, res_0, res_c)
     return res
 
+#added by nswood@mit.edu
+def mobius_matmul(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
+    r"""
+    Compute the generalization of matrix-matrix multiplication in gyrovector spaces.
+
+    
+    .. plot:: plots/extended/stereographic/mobius_matvec.py
+
+    Parameters
+    ----------
+    m : tensor
+        matrix for multiplication. Batched matmul is performed if
+        ``m.dim() > 2``, but only last dim reduction is supported
+    x : matrix for multiplication. Batched matmul is performed if
+        ``m.dim() > 2``, but only last dim reduction is supported
+    k : tensor
+        sectional curvature of manifold
+    dim : int
+        reduction dimension for operations
+
+    Returns
+    -------
+    a
+        Möbius matmul result
+    """
+    return _mobius_matmul(m, x, k, dim=dim)
+
+#added by nswood@mit.edu
+@torch.jit.script
+def _mobius_matmul(m1: torch.Tensor, m2: torch.Tensor, k: torch.Tensor, dim: int = -1):
+    if m1.size(-1) != m2.size(-2):
+        raise RuntimeError("Dimension mismatch: last dimension of 'm1' should match second-to-last dimension of 'm2'.")
+
+    m1m2 = torch.matmul(m1, m2)
+    mag_m2 = m2.norm(dim=-2,p=2).clamp_min(1e-15)
+    mag_m1m2 = m1m2.norm(dim=-2,p=2).clamp_min(1e-15)
+    res_c = tan_k(mag_m1m2 / mag_m2 * artan_k(mag_m2, k), k).unsqueeze(2) * (m1m2/mag_m1m2.unsqueeze(2))
+
+    cond = (m1m2 == 0).prod(dim=dim, keepdim=True, dtype=torch.bool)
+    res_0 = torch.zeros(1, dtype=res_c.dtype, device=res_c.device)
+    res = torch.where(cond, res_0, res_c)
+    return res
 
 # TODO: check if this extends to gyrovector spaces for positive curvature
 # TODO: add plot
@@ -1765,6 +1809,13 @@ def egrad2rgrad(x: torch.Tensor, grad: torch.Tensor, *, k: torch.Tensor, dim=-1)
 
 @torch.jit.script
 def _egrad2rgrad(x: torch.Tensor, grad: torch.Tensor, k: torch.Tensor, dim: int = -1):
+#     print('x pre lam')
+#     if torch.isnan(x).any(): 
+#         torch.save(x,'/n/home11/nswood/Hyp_JT/egrad2')
+#         sys.exit()
+#     print('grad')
+#     print(grad)
+#     print('_lambda_x(x, k, keepdim=True, dim=dim)')
     return grad / _lambda_x(x, k, keepdim=True, dim=dim) ** 2
 
 

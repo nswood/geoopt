@@ -145,6 +145,15 @@ class Stereographic(Manifold):
         self, x: torch.Tensor, y: torch.Tensor, *, keepdim=False, dim=-1
     ) -> torch.Tensor:
         return math.dist(x, y, k=self.k, keepdim=keepdim, dim=dim) ** 2
+    
+    def dist_matrix(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        num_samples = x.shape[0]
+        distances = torch.zeros(num_samples,y.shape[0]).to(x.device)
+
+        for i in range(num_samples):
+            distances[i] = self.dist(x[i], y)
+
+        return distances
 
     def egrad2rgrad(self, x: torch.Tensor, u: torch.Tensor, *, dim=-1) -> torch.Tensor:
         return math.egrad2rgrad(x, u, k=self.k, dim=dim)
@@ -290,6 +299,14 @@ class Stereographic(Manifold):
         self, m: torch.Tensor, x: torch.Tensor, *, dim=-1, project=True
     ) -> torch.Tensor:
         res = math.mobius_matvec(m, x, k=self.k, dim=dim)
+        if project:
+            return math.project(res, k=self.k, dim=dim)
+        else:
+            return res
+    def mobius_matmul(
+        self, m1: torch.Tensor, m2: torch.Tensor, *, dim=-1, project=True
+    ) -> torch.Tensor:
+        res = math.mobius_matmul(m1, m2, k=self.k, dim=dim)
         if project:
             return math.project(res, k=self.k, dim=dim)
         else:
