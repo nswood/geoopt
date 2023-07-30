@@ -25,6 +25,11 @@ import torch.jit
 from typing import List, Optional
 from ...utils import list_range, drop_dims, sign, clamp_abs, sabs
 
+# @torch.jit.script
+def clip_by_norm(input_tensor: torch.Tensor, k:torch.Tensor):
+    norms = torch.norm(input_tensor,dim=1).clamp(max = (1. - 10e-5) / torch.sqrt(-k))
+    output_tensor = torch.nn.functional.normalize(input_tensor,dim=1)*norms.unsqueeze(1)
+    return output_tensor
 
 @torch.jit.script
 def tanh(x):
@@ -33,7 +38,7 @@ def tanh(x):
 
 @torch.jit.script
 def artanh(x: torch.Tensor):
-    x = x.clamp(-1 + 1e-7, 1 - 1e-7)
+    x = x.clamp(-1 + 1e-5, 1 - 1e-5)
     return (torch.log(1 + x).sub(torch.log(1 - x))).mul(0.5)
 
 
@@ -511,6 +516,8 @@ def mobius_add(x: torch.Tensor, y: torch.Tensor, *, k: torch.Tensor, dim=-1):
 
 @torch.jit.script
 def _mobius_add(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1):
+    x = x + 1e-15
+    y = y + 1e-15
     x2 = x.pow(2).sum(dim=dim, keepdim=True)
     y2 = y.pow(2).sum(dim=dim, keepdim=True)
     xy = (x * y).sum(dim=dim, keepdim=True)
@@ -528,7 +535,8 @@ def _mobius_add(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1
     # {- x/<x, x> = y
     # 4)
     # minimum = 1 - 2 <y, y>/<y, y> + <y, y>/<y, y> = 0
-    return num / denom.clamp_min(1e-15)
+    num = num + 1e-15
+    return clip_by_norm(num / denom.clamp_min(1e-15),k)
 
 
 def mobius_sub(x: torch.Tensor, y: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1025,7 +1033,7 @@ def _expmap(x: torch.Tensor, u: torch.Tensor, k: torch.Tensor, dim: int = -1):
     lam = _lambda_x(x, k, dim=dim, keepdim=True)
     second_term = tan_k((lam / 2.0) * u_norm, k) * (u / u_norm)
     y = _mobius_add(x, second_term, k, dim=dim)
-    return y
+    return clip_by_norm(y,k)
 
 
 def expmap0(u: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1058,8 +1066,7 @@ def expmap0(u: torch.Tensor, *, k: torch.Tensor, dim=-1):
 def _expmap0(u: torch.Tensor, k: torch.Tensor, dim: int = -1):
     u_norm = u.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     gamma_1 = tan_k(u_norm, k) * (u / u_norm)
-    return gamma_1
-
+    return clip_by_norm(gamma_1,k)
 
 def geodesic_unit(
     t: torch.Tensor, x: torch.Tensor, u: torch.Tensor, *, k: torch.Tensor, dim=-1
@@ -1152,7 +1159,7 @@ def _logmap(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1):
     sub = _mobius_add(-x, y, k, dim=dim)
     sub_norm = sub.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     lam = _lambda_x(x, k, keepdim=True, dim=dim)
-    return 2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm))
+    return clip_by_norm(2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm)),k)
 
 
 def logmap0(y: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1192,7 +1199,7 @@ def logmap0(y: torch.Tensor, *, k: torch.Tensor, dim=-1):
 @torch.jit.script
 def _logmap0(y: torch.Tensor, k, dim: int = -1):
     y_norm = y.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
-    return (y / y_norm) * artan_k(y_norm, k)
+    return clip_by_norm((y / y_norm) * artan_k(y_norm, k),k)
 
 
 def mobius_matvec(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1231,6 +1238,7 @@ def mobius_matvec(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
 
 @torch.jit.script
 def _mobius_matvec(m: torch.Tensor, x: torch.Tensor, k: torch.Tensor, dim: int = -1):
+    x = x + 1e-15
     if m.dim() > 2 and dim != -1:
         raise RuntimeError(
             "broadcasted Möbius matvec is supported for the last dim only"
@@ -1240,12 +1248,14 @@ def _mobius_matvec(m: torch.Tensor, x: torch.Tensor, k: torch.Tensor, dim: int =
         mx = torch.tensordot(x, m, ([dim], [1]))
     else:
         mx = torch.matmul(m, x.unsqueeze(-1)).squeeze(-1)
+    mx = mx + 1e-15
     mx_norm = mx.norm(dim=dim, keepdim=True, p=2).clamp_min(1e-15)
+    
     res_c = tan_k(mx_norm / x_norm * artan_k(x_norm, k), k) * (mx / mx_norm)
     cond = (mx == 0).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res_0 = torch.zeros(1, dtype=res_c.dtype, device=res_c.device)
     res = torch.where(cond, res_0, res_c)
-    return res
+    return clip_by_norm(res,k)
 
 #added by nswood@mit.edu
 def mobius_matmul(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1277,10 +1287,13 @@ def mobius_matmul(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
 #added by nswood@mit.edu
 @torch.jit.script
 def _mobius_matmul(m1: torch.Tensor, m2: torch.Tensor, k: torch.Tensor, dim: int = -1):
+    m1 = m1+1e-15
+    m2 = m2+1e-15
     if m1.size(-1) != m2.size(-2):
         raise RuntimeError("Dimension mismatch: last dimension of 'm1' should match second-to-last dimension of 'm2'.")
 
     m1m2 = torch.matmul(m1, m2)
+    m1m2 = m1m2 + 1e-15
     mag_m2 = m2.norm(dim=-2,p=2).clamp_min(1e-15)
     mag_m1m2 = m1m2.norm(dim=-2,p=2).clamp_min(1e-15)
     res_c = tan_k(mag_m1m2 / mag_m2 * artan_k(mag_m2, k), k).unsqueeze(2) * (m1m2/mag_m1m2.unsqueeze(2))
@@ -1288,7 +1301,7 @@ def _mobius_matmul(m1: torch.Tensor, m2: torch.Tensor, k: torch.Tensor, dim: int
     cond = (m1m2 == 0).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res_0 = torch.zeros(1, dtype=res_c.dtype, device=res_c.device)
     res = torch.where(cond, res_0, res_c)
-    return res
+    return clip_by_norm(res,k)
 
 # TODO: check if this extends to gyrovector spaces for positive curvature
 # TODO: add plot
