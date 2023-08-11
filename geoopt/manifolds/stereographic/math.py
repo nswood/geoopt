@@ -32,6 +32,51 @@ def clip_by_norm(input_tensor: torch.Tensor, k:torch.Tensor):
     return output_tensor
 
 @torch.jit.script
+def p2k(x: torch.Tensor, k: torch.Tensor):
+    denom = 1 - k * x.pow(2).sum(-1, keepdim=True)
+    return 2 * x / denom
+
+@torch.jit.script
+def k2p(x: torch.Tensor, k: torch.Tensor):
+    denom = 1 + torch.sqrt(1 + k * x.pow(2).sum(-1, keepdim=True))
+    return x / denom
+
+# @torch.jit.script
+def lorenz_factor(x: torch.Tensor, *, k: torch.Tensor, dim: int = -1, keepdim=False):
+    """
+
+    Parameters
+    ----------
+    x : tensor
+        point on Klein disk
+    c : float
+        negative curvature
+    dim : int
+        dimension to calculate Lorenz factor
+    keepdim : bool
+        retain the last dim? (default: false)
+
+    Returns
+    -------
+    tensor
+        Lorenz factor
+    """
+    return 1 / torch.sqrt(1 + k * x.pow(2).sum(dim=dim, keepdim=keepdim))
+
+# @torch.jit.script
+def poincare_mean(x: torch.Tensor, k: torch.Tensor,dim: int = 0,keepdim=True):
+    x = p2k(x, k)
+    lamb = lorenz_factor(x, k=k, keepdim=True)
+    mean = torch.sum(lamb * x, dim=dim, keepdim=True) / torch.sum(
+        lamb, dim=dim, keepdim=True
+    )
+    mean = k2p(mean, k)
+    if not keepdim:
+        return mean.squeeze(dim)
+    return mean
+
+
+@torch.jit.script
 def tanh(x):
     return x.clamp(-15, 15).tanh()
 
@@ -1160,6 +1205,7 @@ def _logmap(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1):
     sub_norm = sub.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     lam = _lambda_x(x, k, keepdim=True, dim=dim)
     return clip_by_norm(2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm)),k)
+#     return 2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm))
 
 
 def logmap0(y: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1199,6 +1245,8 @@ def logmap0(y: torch.Tensor, *, k: torch.Tensor, dim=-1):
 @torch.jit.script
 def _logmap0(y: torch.Tensor, k, dim: int = -1):
     y_norm = y.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
+#     return (y / y_norm) * artan_k(y_norm, k)
+    
     return clip_by_norm((y / y_norm) * artan_k(y_norm, k),k)
 
 
@@ -1348,7 +1396,7 @@ def _mobius_pointwise_mul(
     zero = torch.zeros((), dtype=res_c.dtype, device=res_c.device)
     cond = wx.isclose(zero).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res = torch.where(cond, zero, res_c)
-    return res
+    return clip_by_norm(res,k)
 
 
 def mobius_fn_apply_chain(x: torch.Tensor, *fns: callable, k: torch.Tensor, dim=-1):

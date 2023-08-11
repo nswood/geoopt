@@ -572,6 +572,21 @@ class Stereographic(Manifold):
 
     def inv_sproj(self, x: torch.Tensor, *, dim: int = -1):
         return math.inv_sproj(x, k=self.k, dim=dim)
+    
+#     def p2k(
+#         self, x: torch.Tensor
+#     ) -> torch.Tensor:
+#         return math.p2k(x,k=self.k)
+    
+#     def k2p(
+#         self, x: torch.Tensor
+#     ) -> torch.Tensor:
+#         return math.k2p(x,k=self.k)
+    
+    def poincare_mean(
+        self, x: torch.Tensor,dim: int = 0,keepdim = True
+    ) -> torch.Tensor:
+        return math.poincare_mean(x,k=self.k,dim=dim,keepdim=keepdim)
 
 
 class StereographicExact(Stereographic):
