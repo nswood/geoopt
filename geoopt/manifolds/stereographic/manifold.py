@@ -249,6 +249,10 @@ class Stereographic(Manifold):
             return math.project(res, k=self.k, dim=dim)
         else:
             return res
+    def mobius_total_sum(self, x: torch.Tensor
+    ) -> torch.Tensor:
+        return math.mobius_total_sum(x,k=self.k)
+        
 
     def mobius_sub(
         self, x: torch.Tensor, y: torch.Tensor, *, dim=-1, project=True
@@ -587,7 +591,15 @@ class Stereographic(Manifold):
         self, x: torch.Tensor,dim: int = 0,keepdim = True
     ) -> torch.Tensor:
         return math.poincare_mean(x,k=self.k,dim=dim,keepdim=keepdim)
-
+    def ein_agg(
+        self, a: torch.Tensor, v: torch.Tensor, dim: int = -1, keepdim = True
+    ) -> torch.Tensor:
+        return math.ein_agg(a,v,dim = dim, keepdim = keepdim)
+    
+    
+    def bdist(
+        self, x: torch.Tensor, y: torch.Tensor ) -> torch.Tensor:
+        return math.bdist(x,y,k=self.k)
 
 class StereographicExact(Stereographic):
     __doc__ = r"""{}

@@ -27,41 +27,59 @@ from ...utils import list_range, drop_dims, sign, clamp_abs, sabs
 
 # @torch.jit.script
 def clip_by_norm(input_tensor: torch.Tensor, k:torch.Tensor):
-    norms = torch.norm(input_tensor,dim=1).clamp(max = (1. - 10e-5) / torch.sqrt(-k))
-    output_tensor = torch.nn.functional.normalize(input_tensor,dim=1)*norms.unsqueeze(1)
+    norms = torch.norm(input_tensor,dim=-1).clamp(max = (1. - 10e-2) / torch.sqrt(-k))
+    output_tensor = torch.nn.functional.normalize(input_tensor,dim=-1)*norms.unsqueeze(-1)
     return output_tensor
 
-@torch.jit.script
-def p2k(x: torch.Tensor, k: torch.Tensor):
-    denom = 1 - k * x.pow(2).sum(-1, keepdim=True)
-    return 2 * x / denom
+def mobius_total_sum(x: torch.Tensor, k: torch.Tensor):
+    f = torch.flatten(x)
+    t = torch.zeros(1,1).to(x.device)
+    for a in f:
+        t = mobius_add(t, a, k = k)
+    return t
+
+def p2k(x: torch.Tensor):
+    denom = 1 + x*x.sum(-1, keepdim=True)
+    return klein_constraint(2 * x / denom)
 
 @torch.jit.script
-def k2p(x: torch.Tensor, k: torch.Tensor):
-    denom = 1 + torch.sqrt(1 + k * x.pow(2).sum(-1, keepdim=True))
+def k2p(x: torch.Tensor):
+    denom = 1 + torch.sqrt(1 - x*x.sum(-1, keepdim=True))
     return x / denom
 
+
 # @torch.jit.script
-def lorenz_factor(x: torch.Tensor, *, k: torch.Tensor, dim: int = -1, keepdim=False):
-    """
+def lorenz_factor(x: torch.Tensor, *, dim: int = -1, keepdim=False):
+    
+    return 1 / torch.sqrt(1 - x.pow(2).sum(dim=dim, keepdim=keepdim))
 
-    Parameters
-    ----------
-    x : tensor
-        point on Klein disk
-    c : float
-        negative curvature
-    dim : int
-        dimension to calculate Lorenz factor
-    keepdim : bool
-        retain the last dim? (default: false)
 
-    Returns
-    -------
-    tensor
-        Lorenz factor
-    """
-    return 1 / torch.sqrt(1 + k * x.pow(2).sum(dim=dim, keepdim=keepdim))
+def ein_agg(a: torch.Tensor,v_1: torch.Tensor,dim: int = 0,keepdim=True):
+    v = p2k(v_1)
+    lamb = lorenz_factor(v, keepdim=True)
+    m = (a.unsqueeze(-1)*(lamb*v).unsqueeze(-2)).sum(-2)/(lamb*a).sum(-1,keepdim = True)
+#     alpha = a
+#     alpha_lamb = alpha*lamb
+#     alpha_lamb_sum = torch.sum(alpha_lamb, dim=-1)
+#     alpha_lamb_sum = alpha_lamb_sum.unsqueeze(dim=-1)
+#     alpha_lamb_norm = alpha_lamb / alpha_lamb_sum
+#     rep = alpha_lamb_norm * v_1
+    rep = k2p(m)
+    
+    if not keepdim:
+        return rep.squeeze(dim)
+    return rep
+
+def klein_constraint(x):
+        last_dim_val=x.size(-1)
+        norm = torch.reshape(torch.norm(x, dim=-1), [-1, 1])
+        maxnorm = (1 - 10e-4)
+        cond = norm > maxnorm
+        x_reshape = torch.reshape(x, [-1, last_dim_val])
+        projected = x_reshape /(norm +10e-8) * maxnorm
+        x_reshape = torch.where(cond, projected, x_reshape)
+        x = torch.reshape(x_reshape, list(x.size()))
+        return x
 
 # @torch.jit.script
 def poincare_mean(x: torch.Tensor, k: torch.Tensor,dim: int = 0,keepdim=True):
@@ -74,6 +92,8 @@ def poincare_mean(x: torch.Tensor, k: torch.Tensor,dim: int = 0,keepdim=True):
     if not keepdim:
         return mean.squeeze(dim)
     return mean
+
+
 
 
 @torch.jit.script
@@ -581,6 +601,7 @@ def _mobius_add(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1
     # 4)
     # minimum = 1 - 2 <y, y>/<y, y> + <y, y>/<y, y> = 0
     num = num + 1e-15
+#     return num
     return clip_by_norm(num / denom.clamp_min(1e-15),k)
 
 
@@ -879,7 +900,24 @@ def _mobius_scalar_mul(
 ):
     x_norm = x.norm(dim=dim, keepdim=True, p=2).clamp_min(1e-15)
     res_c = tan_k(r * artan_k(x_norm, k), k) * (x / x_norm)
-    return res_c
+#     return res_c
+    return clip_by_norm(res_c,k)
+
+def bdist(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor):
+    
+    return _bdist(x, y, k)
+
+
+@torch.jit.script
+def _bdist(
+    x: torch.Tensor,
+    y: torch.Tensor,
+    k: torch.Tensor,
+
+):
+    return 2.0 * artan_k(
+        _mobius_add(-x, y, k, dim=-1).norm(dim=-3, p=2, keepdim=False), k
+    )
 
 
 def dist(x: torch.Tensor, y: torch.Tensor, *, k: torch.Tensor, keepdim=False, dim=-1):
@@ -1078,6 +1116,7 @@ def _expmap(x: torch.Tensor, u: torch.Tensor, k: torch.Tensor, dim: int = -1):
     lam = _lambda_x(x, k, dim=dim, keepdim=True)
     second_term = tan_k((lam / 2.0) * u_norm, k) * (u / u_norm)
     y = _mobius_add(x, second_term, k, dim=dim)
+#     return y
     return clip_by_norm(y,k)
 
 
@@ -1111,6 +1150,7 @@ def expmap0(u: torch.Tensor, *, k: torch.Tensor, dim=-1):
 def _expmap0(u: torch.Tensor, k: torch.Tensor, dim: int = -1):
     u_norm = u.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     gamma_1 = tan_k(u_norm, k) * (u / u_norm)
+#     return gamma_1
     return clip_by_norm(gamma_1,k)
 
 def geodesic_unit(
@@ -1204,8 +1244,8 @@ def _logmap(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1):
     sub = _mobius_add(-x, y, k, dim=dim)
     sub_norm = sub.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     lam = _lambda_x(x, k, keepdim=True, dim=dim)
-    return clip_by_norm(2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm)),k)
-#     return 2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm))
+#     return clip_by_norm(2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm)),k)
+    return 2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm))
 
 
 def logmap0(y: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1245,9 +1285,9 @@ def logmap0(y: torch.Tensor, *, k: torch.Tensor, dim=-1):
 @torch.jit.script
 def _logmap0(y: torch.Tensor, k, dim: int = -1):
     y_norm = y.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
-#     return (y / y_norm) * artan_k(y_norm, k)
+    return (y / y_norm) * artan_k(y_norm, k)
     
-    return clip_by_norm((y / y_norm) * artan_k(y_norm, k),k)
+#     return clip_by_norm((y / y_norm) * artan_k(y_norm, k),k)
 
 
 def mobius_matvec(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1303,9 +1343,10 @@ def _mobius_matvec(m: torch.Tensor, x: torch.Tensor, k: torch.Tensor, dim: int =
     cond = (mx == 0).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res_0 = torch.zeros(1, dtype=res_c.dtype, device=res_c.device)
     res = torch.where(cond, res_0, res_c)
+#     return res 
     return clip_by_norm(res,k)
 
-#added by nswood@mit.edu
+#added by me
 def mobius_matmul(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
     r"""
     Compute the generalization of matrix-matrix multiplication in gyrovector spaces.
@@ -1332,7 +1373,7 @@ def mobius_matmul(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
     """
     return _mobius_matmul(m, x, k, dim=dim)
 
-#added by nswood@mit.edu
+#added me
 @torch.jit.script
 def _mobius_matmul(m1: torch.Tensor, m2: torch.Tensor, k: torch.Tensor, dim: int = -1):
     m1 = m1+1e-15
@@ -1349,6 +1390,7 @@ def _mobius_matmul(m1: torch.Tensor, m2: torch.Tensor, k: torch.Tensor, dim: int
     cond = (m1m2 == 0).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res_0 = torch.zeros(1, dtype=res_c.dtype, device=res_c.device)
     res = torch.where(cond, res_0, res_c)
+#     return res
     return clip_by_norm(res,k)
 
 # TODO: check if this extends to gyrovector spaces for positive curvature
@@ -1369,7 +1411,7 @@ def mobius_pointwise_mul(w: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, d
     Parameters
     ----------
     w : tensor
-        weights for multiplication (should be broadcastable to x)
+        tts for multiplication (should be broadcastable to x)
     x : tensor
         point on manifold
     k : tensor
@@ -1396,6 +1438,8 @@ def _mobius_pointwise_mul(
     zero = torch.zeros((), dtype=res_c.dtype, device=res_c.device)
     cond = wx.isclose(zero).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res = torch.where(cond, zero, res_c)
+#     return res
+    
     return clip_by_norm(res,k)
 
 
@@ -2082,7 +2126,7 @@ def _weighted_midpoint(
     if weights is None:
         weights = torch.tensor(1.0, dtype=xs.dtype, device=xs.device)
     else:
-        weights = weights.unsqueeze(dim)
+        weights = weights#.unsqueeze(dim)
     if posweight and weights.lt(0).any():
         xs = torch.where(weights.lt(0), _antipode(xs, k=k, dim=dim), xs)
         weights = weights.abs()
