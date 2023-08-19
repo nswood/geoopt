@@ -54,17 +54,26 @@ def lorenz_factor(x: torch.Tensor, *, dim: int = -1, keepdim=False):
     return 1 / torch.sqrt(1 - x.pow(2).sum(dim=dim, keepdim=keepdim))
 
 
-def ein_agg(a: torch.Tensor,v_1: torch.Tensor,dim: int = 0,keepdim=True):
+def ein_agg(att: torch.Tensor,v_1: torch.Tensor,dim: int = 0,keepdim=True):
     v = p2k(v_1)
     lamb = lorenz_factor(v, keepdim=True)
-    m = (a.unsqueeze(-1)*(lamb*v).unsqueeze(-2)).sum(-2)/(lamb*a).sum(-1,keepdim = True)
+    batched_denom = (lamb*att.permute(0,1,3,2)).permute(0,1,3,2).sum(-1).unsqueeze(-1)   
+    batched_num = (v.unsqueeze(3)*(lamb*att.permute(0,1,3,2)).permute(0,1,3,2).unsqueeze(-1)).sum(-2)
+    temp = batched_num/batched_denom
+#     temp = torch.zeros(v_1.shape).to(v_1.device)
+#     for i in range(100):
+#         temp[:,:,i,:] = (v*lamb*a[:,:,i,:].unsqueeze(-1)).sum(-2)/(lamb*a[:,:,i,:].unsqueeze(-1)).sum(-2)
+
+#     m = (a.unsqueeze(-1)*(lamb*v).unsqueeze(-2)).sum(-2)/(lamb*a).sum(-1,keepdim = True)
+    
 #     alpha = a
 #     alpha_lamb = alpha*lamb
 #     alpha_lamb_sum = torch.sum(alpha_lamb, dim=-1)
 #     alpha_lamb_sum = alpha_lamb_sum.unsqueeze(dim=-1)
 #     alpha_lamb_norm = alpha_lamb / alpha_lamb_sum
 #     rep = alpha_lamb_norm * v_1
-    rep = k2p(m)
+
+    rep = k2p(temp)
     
     if not keepdim:
         return rep.squeeze(dim)

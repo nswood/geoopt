@@ -165,6 +165,8 @@ class Stereographic(Manifold):
 
     def projx(self, x: torch.Tensor, *, dim=-1) -> torch.Tensor:
         return math.project(x, k=self.k, dim=dim)
+    def proj(self, x: torch.Tensor, *, dim=-1) -> torch.Tensor:
+        return math.project(x, k=self.k, dim=dim)
 
     def proju(self, x: torch.Tensor, u: torch.Tensor, *, dim=-1) -> torch.Tensor:
         target_shape = broadcast_shapes(x.shape, u.shape)
