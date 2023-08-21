@@ -596,7 +596,7 @@ class Stereographic(Manifold):
     def ein_agg(
         self, a: torch.Tensor, v: torch.Tensor, dim: int = -1, keepdim = True
     ) -> torch.Tensor:
-        return math.ein_agg(a,v,dim = dim, keepdim = keepdim)
+        return math.ein_agg(a,v,self.c,dim = dim, keepdim = keepdim)
     
     
     def bdist(

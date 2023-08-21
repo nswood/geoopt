@@ -38,28 +38,38 @@ def mobius_total_sum(x: torch.Tensor, k: torch.Tensor):
         t = mobius_add(t, a, k = k)
     return t
 
-def p2k(x: torch.Tensor):
-    denom = 1 + x*x.sum(-1, keepdim=True)
-    return klein_constraint(2 * x / denom)
+def p2k(x: torch.Tensor,c: torch.Tensor):
+    
+    denom = 1 + c*x*x.sum(-1, keepdim=True)
+    return klein_constraint(2 * x / denom.clamp_min(1e-15))
 
 @torch.jit.script
-def k2p(x: torch.Tensor):
-    denom = 1 + torch.sqrt(1 - x*x.sum(-1, keepdim=True))
-    return x / denom
+def k2p(x: torch.Tensor,c: torch.Tensor):
+    denom = 1 + torch.sqrt(1 -c * x*x.sum(-1, keepdim=True))
+    return x / denom.clamp_min(1e-15)
 
 
 # @torch.jit.script
 def lorenz_factor(x: torch.Tensor, *, dim: int = -1, keepdim=False):
     
-    return 1 / torch.sqrt(1 - x.pow(2).sum(dim=dim, keepdim=keepdim))
+#     return 1 / torch.sqrt(x.pow(2).sum(dim=dim, keepdim=keepdim)).clamp_min(1e-15)
+    
+    
+    return 1 / torch.sqrt(1 - x.pow(2).sum(dim=dim, keepdim=keepdim)).clamp_min(1e-15)
 
 
-def ein_agg(att: torch.Tensor,v_1: torch.Tensor,dim: int = 0,keepdim=True):
-    v = p2k(v_1)
+def ein_agg(att: torch.Tensor,v_1: torch.Tensor,c: torch.Tensor,dim: int = 0,keepdim=True):
+#     if v_1.isnan().any():
+#         print('v_1')
+    v = p2k(v_1,c)
     lamb = lorenz_factor(v, keepdim=True)
+#     if lamb.isnan().any():
+#         print('lamb')
     batched_denom = (lamb*att.permute(0,1,3,2)).permute(0,1,3,2).sum(-1).unsqueeze(-1)   
     batched_num = (v.unsqueeze(3)*(lamb*att.permute(0,1,3,2)).permute(0,1,3,2).unsqueeze(-1)).sum(-2)
-    temp = batched_num/batched_denom
+    temp = batched_num/batched_denom.clamp_min(1e-15)
+#     if temp.isnan().any():
+#         print('temp')
 #     temp = torch.zeros(v_1.shape).to(v_1.device)
 #     for i in range(100):
 #         temp[:,:,i,:] = (v*lamb*a[:,:,i,:].unsqueeze(-1)).sum(-2)/(lamb*a[:,:,i,:].unsqueeze(-1)).sum(-2)
@@ -73,16 +83,18 @@ def ein_agg(att: torch.Tensor,v_1: torch.Tensor,dim: int = 0,keepdim=True):
 #     alpha_lamb_norm = alpha_lamb / alpha_lamb_sum
 #     rep = alpha_lamb_norm * v_1
 
-    rep = k2p(temp)
+    rep = k2p(temp,c)
     
     if not keepdim:
         return rep.squeeze(dim)
+#     if rep.isnan().any():
+#         print('rep')
     return rep
 
 def klein_constraint(x):
         last_dim_val=x.size(-1)
         norm = torch.reshape(torch.norm(x, dim=-1), [-1, 1])
-        maxnorm = (1 - 10e-4)
+        maxnorm = (1 - 10e-5)
         cond = norm > maxnorm
         x_reshape = torch.reshape(x, [-1, last_dim_val])
         projected = x_reshape /(norm +10e-8) * maxnorm
@@ -609,9 +621,9 @@ def _mobius_add(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1
     # {- x/<x, x> = y
     # 4)
     # minimum = 1 - 2 <y, y>/<y, y> + <y, y>/<y, y> = 0
-    num = num + 1e-15
-#     return num
-    return clip_by_norm(num / denom.clamp_min(1e-15),k)
+#     num = num + 1e-15
+    return num/denom.clamp_min(1e-15)
+#     return clip_by_norm(num / denom.clamp_min(1e-15),k)
 
 
 def mobius_sub(x: torch.Tensor, y: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -924,6 +936,7 @@ def _bdist(
     k: torch.Tensor,
 
 ):
+    
     return 2.0 * artan_k(
         _mobius_add(-x, y, k, dim=-1).norm(dim=-3, p=2, keepdim=False), k
     )
