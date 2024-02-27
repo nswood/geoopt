@@ -40,55 +40,50 @@ def mobius_total_sum(x: torch.Tensor, k: torch.Tensor):
 
 def p2k(x: torch.Tensor,c: torch.Tensor):
     
-    denom = 1 + c*x*x.sum(-1, keepdim=True)
+    denom = 1 + c*(x*x).sum(-1, keepdim=True)
     return klein_constraint(2 * x / denom.clamp_min(1e-15))
 
 @torch.jit.script
 def k2p(x: torch.Tensor,c: torch.Tensor):
-    denom = 1 + torch.sqrt(1 -c * x*x.sum(-1, keepdim=True))
+    if torch.sqrt(1 - c * (x*x).sum(-1, keepdim=True)).isnan().any():
+        print('neg')
+    denom = 1 + torch.sqrt(1 - c * (x*x).sum(-1, keepdim=True))
     return x / denom.clamp_min(1e-15)
 
 
 # @torch.jit.script
-def lorenz_factor(x: torch.Tensor, *, dim: int = -1, keepdim=False):
+def lorenz_factor(x: torch.Tensor, k:torch.Tensor):
     
-#     return 1 / torch.sqrt(x.pow(2).sum(dim=dim, keepdim=keepdim)).clamp_min(1e-15)
+    return 2 / (1+ k * x.pow(2).sum(dim=-1, keepdim=True)).clamp_min(1e-15)
     
     
-    return 1 / torch.sqrt(1 - x.pow(2).sum(dim=dim, keepdim=keepdim)).clamp_min(1e-15)
+#     return 1 / torch.sqrt(1 - x.pow(2).sum(dim=-1, keepdim=True)/c.pow(2)).clamp_min(1e-15)
 
-
+#IN KLEIN COORDINATES
 def ein_agg(att: torch.Tensor,v_1: torch.Tensor,c: torch.Tensor,dim: int = 0,keepdim=True):
-#     if v_1.isnan().any():
-#         print('v_1')
+
+    
     v = p2k(v_1,c)
-    lamb = lorenz_factor(v, keepdim=True)
-#     if lamb.isnan().any():
-#         print('lamb')
+    
+
+    lamb = lorenz_factor(v,c)
+
+    
     batched_denom = (lamb*att.permute(0,1,3,2)).permute(0,1,3,2).sum(-1).unsqueeze(-1)   
+    
     batched_num = (v.unsqueeze(3)*(lamb*att.permute(0,1,3,2)).permute(0,1,3,2).unsqueeze(-1)).sum(-2)
-    temp = batched_num/batched_denom.clamp_min(1e-15)
-#     if temp.isnan().any():
-#         print('temp')
-#     temp = torch.zeros(v_1.shape).to(v_1.device)
-#     for i in range(100):
-#         temp[:,:,i,:] = (v*lamb*a[:,:,i,:].unsqueeze(-1)).sum(-2)/(lamb*a[:,:,i,:].unsqueeze(-1)).sum(-2)
-
-#     m = (a.unsqueeze(-1)*(lamb*v).unsqueeze(-2)).sum(-2)/(lamb*a).sum(-1,keepdim = True)
     
-#     alpha = a
-#     alpha_lamb = alpha*lamb
-#     alpha_lamb_sum = torch.sum(alpha_lamb, dim=-1)
-#     alpha_lamb_sum = alpha_lamb_sum.unsqueeze(dim=-1)
-#     alpha_lamb_norm = alpha_lamb / alpha_lamb_sum
-#     rep = alpha_lamb_norm * v_1
 
+    temp = batched_num / (batched_denom.clamp_min(1e-10))
+
+    
     rep = k2p(temp,c)
-    
+
     if not keepdim:
         return rep.squeeze(dim)
-#     if rep.isnan().any():
-#         print('rep')
+    if rep.isnan().any():
+        print('rep')
+        torch.save(temp,'temp')
     return rep
 
 def klein_constraint(x):
@@ -602,8 +597,8 @@ def mobius_add(x: torch.Tensor, y: torch.Tensor, *, k: torch.Tensor, dim=-1):
 
 @torch.jit.script
 def _mobius_add(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1):
-    x = x + 1e-15
-    y = y + 1e-15
+#     x = x + 1e-15
+#     y = y + 1e-15
     x2 = x.pow(2).sum(dim=dim, keepdim=True)
     y2 = y.pow(2).sum(dim=dim, keepdim=True)
     xy = (x * y).sum(dim=dim, keepdim=True)
@@ -921,8 +916,8 @@ def _mobius_scalar_mul(
 ):
     x_norm = x.norm(dim=dim, keepdim=True, p=2).clamp_min(1e-15)
     res_c = tan_k(r * artan_k(x_norm, k), k) * (x / x_norm)
-#     return res_c
-    return clip_by_norm(res_c,k)
+    return res_c
+#     return clip_by_norm(res_c,k)
 
 def bdist(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor):
     
@@ -1134,12 +1129,17 @@ def expmap(x: torch.Tensor, u: torch.Tensor, *, k: torch.Tensor, dim=-1):
 
 @torch.jit.script
 def _expmap(x: torch.Tensor, u: torch.Tensor, k: torch.Tensor, dim: int = -1):
+#     u_norm = u.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
+#     lam = _lambda_x(x, k, dim=dim, keepdim=True)
+#     second_term = tan_k((lam / 2.0) * u_norm, k) * (u / u_norm)
+#     y = _mobius_add(x, second_term, k, dim=dim)
+# #     return y
+#     return clip_by_norm(y,k)
     u_norm = u.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     lam = _lambda_x(x, k, dim=dim, keepdim=True)
     second_term = tan_k((lam / 2.0) * u_norm, k) * (u / u_norm)
     y = _mobius_add(x, second_term, k, dim=dim)
-#     return y
-    return clip_by_norm(y,k)
+    return y
 
 
 def expmap0(u: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1172,8 +1172,8 @@ def expmap0(u: torch.Tensor, *, k: torch.Tensor, dim=-1):
 def _expmap0(u: torch.Tensor, k: torch.Tensor, dim: int = -1):
     u_norm = u.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     gamma_1 = tan_k(u_norm, k) * (u / u_norm)
-#     return gamma_1
-    return clip_by_norm(gamma_1,k)
+    return gamma_1
+#     return clip_by_norm(gamma_1,k)
 
 def geodesic_unit(
     t: torch.Tensor, x: torch.Tensor, u: torch.Tensor, *, k: torch.Tensor, dim=-1
@@ -1365,8 +1365,8 @@ def _mobius_matvec(m: torch.Tensor, x: torch.Tensor, k: torch.Tensor, dim: int =
     cond = (mx == 0).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res_0 = torch.zeros(1, dtype=res_c.dtype, device=res_c.device)
     res = torch.where(cond, res_0, res_c)
-#     return res 
-    return clip_by_norm(res,k)
+    return res 
+#     return clip_by_norm(res,k)
 
 #added by me
 def mobius_matmul(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1412,8 +1412,8 @@ def _mobius_matmul(m1: torch.Tensor, m2: torch.Tensor, k: torch.Tensor, dim: int
     cond = (m1m2 == 0).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res_0 = torch.zeros(1, dtype=res_c.dtype, device=res_c.device)
     res = torch.where(cond, res_0, res_c)
-#     return res
-    return clip_by_norm(res,k)
+    return res
+#     return clip_by_norm(res,k)
 
 # TODO: check if this extends to gyrovector spaces for positive curvature
 # TODO: add plot
@@ -1460,9 +1460,9 @@ def _mobius_pointwise_mul(
     zero = torch.zeros((), dtype=res_c.dtype, device=res_c.device)
     cond = wx.isclose(zero).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res = torch.where(cond, zero, res_c)
-#     return res
+    return res
     
-    return clip_by_norm(res,k)
+#     return clip_by_norm(res,k)
 
 
 def mobius_fn_apply_chain(x: torch.Tensor, *fns: callable, k: torch.Tensor, dim=-1):
@@ -1835,8 +1835,8 @@ def _parallel_transport(
 ):
     return (
         _gyration(y, -x, u, k, dim=dim)
-        * _lambda_x(x, k, keepdim=True, dim=dim)
-        / _lambda_x(y, k, keepdim=True, dim=dim)
+        * _lambda_x(x, k, keepdim=True, dim=dim).clamp_min(1e-15)
+        / _lambda_x(y, k, keepdim=True, dim=dim).clamp_min(1e-15)
     )
 
 
@@ -2130,6 +2130,8 @@ def weighted_midpoint(
     )
 
 
+
+#ALL IN POINCARE
 @torch.jit.script
 def _weighted_midpoint(
     xs: torch.Tensor,
@@ -2145,6 +2147,12 @@ def _weighted_midpoint(
         reducedim = list_range(xs.dim())
         reducedim.pop(dim)
     gamma = _lambda_x(xs, k=k, dim=dim, keepdim=True)
+#     gamma = lorenz_factor(xs,-k)
+#     gamma = lorenz_factor(xs,-k)
+    if torch.isnan(gamma).any():
+        print('gamma')
+    
+    
     if weights is None:
         weights = torch.tensor(1.0, dtype=xs.dtype, device=xs.device)
     else:
@@ -2153,31 +2161,19 @@ def _weighted_midpoint(
         xs = torch.where(weights.lt(0), _antipode(xs, k=k, dim=dim), xs)
         weights = weights.abs()
     denominator = ((gamma - 1) * weights).sum(reducedim, keepdim=True)
-    nominator = (gamma * weights * xs).sum(reducedim, keepdim=True)
+    
+    #modification
+    nominator =  ((gamma * xs).unsqueeze(-2).expand(-1, -1, -1, 25, -1)*weights.unsqueeze(-1)).sum(-2)
+    if torch.isnan(nominator).any():
+        print('nom')
     two_mean = nominator / clamp_abs(denominator, 1e-10)
+    if torch.isnan(two_mean).any():
+        print('two mean')
+#     a_mean = _mobius_add(
+#         torch.tensor(0.5, dtype=xs.dtype, device=xs.device), two_mean, k=k, dim=dim
+#     )
     a_mean = _mobius_scalar_mul(
         torch.tensor(0.5, dtype=xs.dtype, device=xs.device), two_mean, k=k, dim=dim
     )
-    if torch.any(k.gt(0)):
-        # check antipode
-        b_mean = _antipode(a_mean, k, dim=dim)
-        a_dist = _dist(a_mean, xs, k=k, keepdim=True, dim=dim).sum(
-            reducedim, keepdim=True
-        )
-        b_dist = _dist(b_mean, xs, k=k, keepdim=True, dim=dim).sum(
-            reducedim, keepdim=True
-        )
-        better = k.gt(0) & (b_dist < a_dist)
-        a_mean = torch.where(better, b_mean, a_mean)
-    if lincomb:
-        if weights.numel() == 1:
-            alpha = weights.clone()
-            for d in reducedim:
-                alpha *= xs.size(d)
-        else:
-            weights, _ = torch.broadcast_tensors(weights, gamma)
-            alpha = weights.sum(reducedim, keepdim=True)
-        a_mean = _mobius_scalar_mul(alpha, a_mean, k=k, dim=dim)
-    if not keepdim:
-        a_mean = drop_dims(a_mean, reducedim)
+
     return a_mean
