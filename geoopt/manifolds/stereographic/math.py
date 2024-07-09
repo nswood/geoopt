@@ -2061,6 +2061,7 @@ def weighted_midpoint(
     keepdim: bool = False,
     lincomb: bool = False,
     posweight: bool = False,
+    parts: int = 25,
 ):
     r"""
     Compute weighted Möbius gyromidpoint.
@@ -2127,6 +2128,7 @@ def weighted_midpoint(
         keepdim=keepdim,
         lincomb=lincomb,
         posweight=posweight,
+        parts = parts
     )
 
 
@@ -2142,6 +2144,7 @@ def _weighted_midpoint(
     keepdim: bool = False,
     lincomb: bool = False,
     posweight: bool = False,
+    parts: int  = 25, 
 ):
     if reducedim is None:
         reducedim = list_range(xs.dim())
@@ -2163,7 +2166,7 @@ def _weighted_midpoint(
     denominator = ((gamma - 1) * weights).sum(reducedim, keepdim=True)
     
     #modification
-    nominator =  ((gamma * xs).unsqueeze(-2).expand(-1, -1, -1, 25, -1)*weights.unsqueeze(-1)).sum(-2)
+    nominator =  ((gamma * xs).unsqueeze(-2).expand(-1, -1, -1, parts, -1)*weights.unsqueeze(-1)).sum(-2)
     if torch.isnan(nominator).any():
         print('nom')
     two_mean = nominator / clamp_abs(denominator, 1e-10)

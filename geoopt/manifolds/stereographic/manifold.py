@@ -557,6 +557,7 @@ class Stereographic(Manifold):
         lincomb: bool = False,
         posweight=False,
         project=True,
+        parts=25,
     ):
         mid = math.weighted_midpoint(
             xs=xs,
@@ -567,6 +568,7 @@ class Stereographic(Manifold):
             keepdim=keepdim,
             lincomb=lincomb,
             posweight=posweight,
+            parts = parts,
         )
         if project:
             return math.project(mid, k=self.k, dim=dim)

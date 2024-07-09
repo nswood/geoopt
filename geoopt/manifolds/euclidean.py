@@ -84,6 +84,8 @@ class Euclidean(Manifold):
     def logmap(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
         return y - x
 
+    def logmap0(self, x: torch.Tensor) -> torch.Tensor:
+        return x
     def dist(self, x: torch.Tensor, y: torch.Tensor, *, keepdim=False) -> torch.Tensor:
         if self.ndim > 0:
             return (x - y).norm(dim=tuple(range(-self.ndim, 0)), keepdim=keepdim)
@@ -102,6 +104,9 @@ class Euclidean(Manifold):
 
     def expmap(self, x: torch.Tensor, u: torch.Tensor) -> torch.Tensor:
         return x + u
+    
+    def expmap0(self, x: torch.Tensor) -> torch.Tensor:
+        return x 
 
     def transp(self, x: torch.Tensor, y: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
         target_shape = broadcast_shapes(x.shape, y.shape, v.shape)
