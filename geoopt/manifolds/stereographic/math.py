@@ -967,7 +967,7 @@ def dist(x: torch.Tensor, y: torch.Tensor, *, k: torch.Tensor, keepdim=False, di
     """
     return _dist(x, y, k, keepdim=keepdim, dim=dim)
 
-
+# Added factor to match [1911.05076]
 @torch.jit.script
 def _dist(
     x: torch.Tensor,
@@ -976,7 +976,7 @@ def _dist(
     keepdim: bool = False,
     dim: int = -1,
 ):
-    return 2.0 * artan_k(
+    return (2.0/(torch.abs(k).sqrt())) * artan_k(
         _mobius_add(-x, y, k, dim=dim).norm(dim=dim, p=2, keepdim=keepdim), k
     )
 
@@ -1004,9 +1004,10 @@ def dist0(x: torch.Tensor, *, k: torch.Tensor, keepdim=False, dim=-1):
     return _dist0(x, k, keepdim=keepdim, dim=dim)
 
 
+# Added factor to match [1911.05076]
 @torch.jit.script
 def _dist0(x: torch.Tensor, k: torch.Tensor, keepdim: bool = False, dim: int = -1):
-    return 2.0 * artan_k(x.norm(dim=dim, p=2, keepdim=keepdim), k)
+    return (2.0/(torch.abs(k).sqrt())) * artan_k(x.norm(dim=dim, p=2, keepdim=keepdim), k)
 
 
 def geodesic(
@@ -1126,7 +1127,7 @@ def expmap(x: torch.Tensor, u: torch.Tensor, *, k: torch.Tensor, dim=-1):
     """
     return _expmap(x, u, k, dim=dim)
 
-
+# Added factor to match [1911.05076]
 @torch.jit.script
 def _expmap(x: torch.Tensor, u: torch.Tensor, k: torch.Tensor, dim: int = -1):
 #     u_norm = u.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
@@ -1137,7 +1138,8 @@ def _expmap(x: torch.Tensor, u: torch.Tensor, k: torch.Tensor, dim: int = -1):
 #     return clip_by_norm(y,k)
     u_norm = u.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     lam = _lambda_x(x, k, dim=dim, keepdim=True)
-    second_term = tan_k((lam / 2.0) * u_norm, k) * (u / u_norm)
+    k_factor = torch.abs(k).sqrt()
+    second_term = tan_k(k_factor*(lam / 2.0) * u_norm, k) * (u / u_norm)
     y = _mobius_add(x, second_term, k, dim=dim)
     return y
 
@@ -1168,10 +1170,12 @@ def expmap0(u: torch.Tensor, *, k: torch.Tensor, dim=-1):
     """
     return _expmap0(u, k, dim=dim)
 
+# Added factor to match [1911.05076]
 @torch.jit.script
 def _expmap0(u: torch.Tensor, k: torch.Tensor, dim: int = -1):
+    k_factor = torch.abs(k).sqrt()
     u_norm = u.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
-    gamma_1 = tan_k(u_norm, k) * (u / u_norm)
+    gamma_1 = tan_k(k_factor*u_norm, k) * (u / u_norm)
     return gamma_1
 #     return clip_by_norm(gamma_1,k)
 
@@ -1260,14 +1264,15 @@ def logmap(x: torch.Tensor, y: torch.Tensor, *, k: torch.Tensor, dim=-1):
     """
     return _logmap(x, y, k, dim=dim)
 
-
+# Added factor to match [1911.05076]
 @torch.jit.script
 def _logmap(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1):
     sub = _mobius_add(-x, y, k, dim=dim)
     sub_norm = sub.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
+    k_factor = torch.abs(k).sqrt()
     lam = _lambda_x(x, k, keepdim=True, dim=dim)
 #     return clip_by_norm(2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm)),k)
-    return 2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm))
+    return 2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm*k_factor))
 
 
 def logmap0(y: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1303,11 +1308,12 @@ def logmap0(y: torch.Tensor, *, k: torch.Tensor, dim=-1):
     """
     return _logmap0(y, k, dim=dim)
 
-
+# Added factor to match [1911.05076]
 @torch.jit.script
 def _logmap0(y: torch.Tensor, k, dim: int = -1):
+    k_factor = torch.abs(k).sqrt()
     y_norm = y.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
-    return (y / y_norm) * artan_k(y_norm, k)
+    return (y / (k_factor*y_norm)) * artan_k(y_norm, k)
     
 #     return clip_by_norm((y / y_norm) * artan_k(y_norm, k),k)
 
@@ -2138,7 +2144,7 @@ def weighted_midpoint(
 def _weighted_midpoint(
     xs: torch.Tensor,
     k: torch.Tensor,
-    weights: Optional[torch.Tensor] = None,
+    weights: torch.Tensor,
     reducedim: Optional[List[int]] = None,
     dim: int = -1,
     keepdim: bool = False,
@@ -2146,37 +2152,52 @@ def _weighted_midpoint(
     posweight: bool = False,
     parts: int  = 25, 
 ):
-    if reducedim is None:
-        reducedim = list_range(xs.dim())
-        reducedim.pop(dim)
-    gamma = _lambda_x(xs, k=k, dim=dim, keepdim=True)
-#     gamma = lorenz_factor(xs,-k)
-#     gamma = lorenz_factor(xs,-k)
-    if torch.isnan(gamma).any():
-        print('gamma')
+#     if reducedim is None:
+#         reducedim = list_range(xs.dim())
+#         reducedim.pop(dim)
+#     gamma = _lambda_x(xs, k=k, dim=-1, keepdim=True)
+# #     gamma = lorenz_factor(xs,-k)
+# #     gamma = lorenz_factor(xs,-k)
+#     if torch.isnan(gamma).any():
+#         print('gamma')
     
     
-    if weights is None:
-        weights = torch.tensor(1.0, dtype=xs.dtype, device=xs.device)
-    else:
-        weights = weights#.unsqueeze(dim)
-    if posweight and weights.lt(0).any():
-        xs = torch.where(weights.lt(0), _antipode(xs, k=k, dim=dim), xs)
-        weights = weights.abs()
-    denominator = ((gamma - 1) * weights).sum(reducedim, keepdim=True)
+#     if weights is None:
+#         weights = torch.tensor(1.0, dtype=xs.dtype, device=xs.device)
+#     else:
+#         weights = weights#.unsqueeze(dim)
+#     if posweight and weights.lt(0).any():
+#         xs = torch.where(weights.lt(0), _antipode(xs, k=k, dim=dim), xs)
+#         weights = weights.abs()
+#     denominator = ((gamma - 1) * weights).sum(-1, keepdim=True)
     
-    #modification
-    nominator =  ((gamma * xs).unsqueeze(-2).expand(-1, -1, -1, parts, -1)*weights.unsqueeze(-1)).sum(-2)
-    if torch.isnan(nominator).any():
-        print('nom')
-    two_mean = nominator / clamp_abs(denominator, 1e-10)
-    if torch.isnan(two_mean).any():
-        print('two mean')
-#     a_mean = _mobius_add(
+#     #modification
+# #     nominator =  ((gamma * xs).unsqueeze(-2).expand(-1, -1, -1, parts, -1)*weights.unsqueeze(-1)).sum(-2)
+#     nominator =  ((gamma * xs).unsqueeze(-2).expand(-1, -1, -1, parts, -1)*weights.unsqueeze(-1)).squeeze(-2).sum(dim,keepdim = True)
+#     if nominator.shape[-2] ==1 and len(nominator.shape) == 5:
+#         nominator = nominator.squeeze(-2)
+
+#     if torch.isnan(nominator).any():
+#         print('nom')
+#     two_mean = nominator / clamp_abs(denominator, 1e-10)
+#     if torch.isnan(two_mean).any():
+#         print('two mean')
+#     a_mean = _mobius_scalar_mul(
 #         torch.tensor(0.5, dtype=xs.dtype, device=xs.device), two_mean, k=k, dim=dim
 #     )
+    
+    gamma_xs = _lambda_x(xs, k=k, dim=dim, keepdim=True)  # Shape: (batch, head, sequence_length, 1)
+    
+    numerator_weights = ((weights*gamma_xs.permute(0,1,3,2))).permute(0,1,3,2)
+    
+    numerator_sum = torch.sum((numerator_weights.unsqueeze(-1)*xs.unsqueeze(-2)).permute(0,1,3,2,4),dim = -2)
+    del numerator_weights
+    denom =torch.sum(weights*(gamma_xs-1).permute(0,1,3,2), dim = -1).unsqueeze(-1)
+    
+    weighted_sum = numerator_sum/(denom).clamp_min(1e-15)
+    del denom
     a_mean = _mobius_scalar_mul(
-        torch.tensor(0.5, dtype=xs.dtype, device=xs.device), two_mean, k=k, dim=dim
+        torch.tensor(0.5, dtype=xs.dtype, device=xs.device), weighted_sum, k=k, dim=dim
     )
 
     return a_mean
