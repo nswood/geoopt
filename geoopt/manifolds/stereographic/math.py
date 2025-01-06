@@ -27,7 +27,7 @@ from ...utils import list_range, drop_dims, sign, clamp_abs, sabs
 
 # @torch.jit.script
 def clip_by_norm(input_tensor: torch.Tensor, k:torch.Tensor):
-    norms = torch.norm(input_tensor,dim=-1).clamp(max = (1. - 10e-2) / torch.sqrt(-k))
+    norms = torch.norm(input_tensor,dim=-1).clamp(max = (1. - 10e-2)*k.abs().sqrt().reciprocal())
     output_tensor = torch.nn.functional.normalize(input_tensor,dim=-1)*norms.unsqueeze(-1)
     return output_tensor
 
@@ -617,8 +617,8 @@ def _mobius_add(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1
     # 4)
     # minimum = 1 - 2 <y, y>/<y, y> + <y, y>/<y, y> = 0
 #     num = num + 1e-15
-    return num/denom.clamp_min(1e-15)
-#     return clip_by_norm(num / denom.clamp_min(1e-15),k)
+    # return num/denom.clamp_min(1e-15)
+    return clip_by_norm(num / denom.clamp_min(1e-15),k)
 
 
 def mobius_sub(x: torch.Tensor, y: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -916,8 +916,8 @@ def _mobius_scalar_mul(
 ):
     x_norm = x.norm(dim=dim, keepdim=True, p=2).clamp_min(1e-15)
     res_c = tan_k(r * artan_k(x_norm, k), k) * (x / x_norm)
-    return res_c
-#     return clip_by_norm(res_c,k)
+    # return res_c
+    return clip_by_norm(res_c,k)
 
 def bdist(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor):
     
@@ -1176,8 +1176,8 @@ def _expmap0(u: torch.Tensor, k: torch.Tensor, dim: int = -1):
     k_factor = torch.abs(k).sqrt()
     u_norm = u.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     gamma_1 = tan_k(k_factor*u_norm, k) * (u / u_norm)
-    return gamma_1
-#     return clip_by_norm(gamma_1,k)
+    # return gamma_1
+    return clip_by_norm(gamma_1,k)
 
 def geodesic_unit(
     t: torch.Tensor, x: torch.Tensor, u: torch.Tensor, *, k: torch.Tensor, dim=-1
@@ -1271,8 +1271,8 @@ def _logmap(x: torch.Tensor, y: torch.Tensor, k: torch.Tensor, dim: int = -1):
     sub_norm = sub.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     k_factor = torch.abs(k).sqrt()
     lam = _lambda_x(x, k, keepdim=True, dim=dim)
-#     return clip_by_norm(2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm)),k)
-    return 2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm*k_factor))
+    return clip_by_norm(2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm)),k)
+    # return 2.0 * artan_k(sub_norm, k) * (sub / (lam * sub_norm*k_factor))
 
 
 def logmap0(y: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1315,7 +1315,7 @@ def _logmap0(y: torch.Tensor, k, dim: int = -1):
     y_norm = y.norm(dim=dim, p=2, keepdim=True).clamp_min(1e-15)
     return (y / (k_factor*y_norm)) * artan_k(y_norm, k)
     
-#     return clip_by_norm((y / y_norm) * artan_k(y_norm, k),k)
+    # return clip_by_norm((y / y_norm) * artan_k(y_norm, k),k)
 
 
 def mobius_matvec(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1371,8 +1371,8 @@ def _mobius_matvec(m: torch.Tensor, x: torch.Tensor, k: torch.Tensor, dim: int =
     cond = (mx == 0).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res_0 = torch.zeros(1, dtype=res_c.dtype, device=res_c.device)
     res = torch.where(cond, res_0, res_c)
-    return res 
-#     return clip_by_norm(res,k)
+    # return res 
+    return clip_by_norm(res,k)
 
 #added by me
 def mobius_matmul(m: torch.Tensor, x: torch.Tensor, *, k: torch.Tensor, dim=-1):
@@ -1418,8 +1418,8 @@ def _mobius_matmul(m1: torch.Tensor, m2: torch.Tensor, k: torch.Tensor, dim: int
     cond = (m1m2 == 0).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res_0 = torch.zeros(1, dtype=res_c.dtype, device=res_c.device)
     res = torch.where(cond, res_0, res_c)
-    return res
-#     return clip_by_norm(res,k)
+    # return res
+    return clip_by_norm(res,k)
 
 # TODO: check if this extends to gyrovector spaces for positive curvature
 # TODO: add plot
@@ -1466,9 +1466,9 @@ def _mobius_pointwise_mul(
     zero = torch.zeros((), dtype=res_c.dtype, device=res_c.device)
     cond = wx.isclose(zero).prod(dim=dim, keepdim=True, dtype=torch.bool)
     res = torch.where(cond, zero, res_c)
-    return res
+    # return res
     
-#     return clip_by_norm(res,k)
+    return clip_by_norm(res,k)
 
 
 def mobius_fn_apply_chain(x: torch.Tensor, *fns: callable, k: torch.Tensor, dim=-1):
